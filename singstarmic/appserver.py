@@ -3,24 +3,24 @@ import socket, time, logging, struct, enum
 from datetime import datetime, timedelta
 
 class Packet(enum.Enum):
-	ID_CONNECT            = 0
-	ID_DISCONNECT         = 1 # CLIENT -> SERVER
-	ID_RTT                = 2
-	ID_ACK                = 3
+	CONNECT               = 0
+	DISCONNECT            = 1 # client -> server
+	RTT                   = 2
+	ACK                   = 3
 	CONNECTION_CHALLENGE  = 4
-	CONNECTION_CODE       = 5 # CLIENT -> SERVER
+	CONNECTION_CODE       = 5 # client -> server
 	CONNECTION_SUCCESSFUL = 6
 
-	ID_AUDIO              = 256 # CLIENT -> SERVER
-	ID_MIC_SET            = 257
-	ID_PERFORMANCE        = 259
-	ID_STATE_SELECTION    = 260
-	ID_PEERS_STATE        = 261
-	ID_CATALOGUE_REFRESH  = 262
-	ID_PLAYLIST_REFRESH   = 263
+	AUDIO                 = 256 # client -> server
+	MIC_SET               = 257
+	PERFORMANCE           = 259
+	STATE_SELECTION       = 260
+	PEERS_STATE           = 261
+	CATALOGUE_REFRESH     = 262
+	PLAYLIST_REFRESH      = 263
 	MIC_STATE             = 264
 	CURRENT_PLAYLIST      = 265
-	TELEMETRY             = 266 # CLIENT -> SERVER
+	TELEMETRY             = 266 # client -> server
 	SESSION               = 267
 
 class PeerState(enum.Enum):
@@ -29,7 +29,7 @@ class PeerState(enum.Enum):
 	VFX      = 3
 	PLAYLIST = 4
 
-NO_ACK = [Packet.ID_AUDIO, Packet.ID_ACK]
+NO_ACK = [Packet.AUDIO, Packet.ACK]
 
 class Player:
 	ip = None
@@ -45,6 +45,9 @@ class Player:
 class AppServer:
 	IP = "0.0.0.0"
 	PORT = 12000
+
+	# Server state
+	performanceState = 'disable'
 
 	def __init__(self, micNo = 2):
 		self.is_running = True
@@ -63,7 +66,7 @@ class AppServer:
 
 	def sendKeepAlive(self, player):
 		if (datetime.now() - player.pingTime).total_seconds() > 10:
-			self.send(player, Packet.ID_RTT)
+			self.send(player, Packet.RTT)
 
 	def sendPeerState(self, player):
 		data = bytearray()
@@ -74,62 +77,70 @@ class AppServer:
 				slot = i
 			i += 1
 			data += struct.pack('>i', p.peerState)
-		self.send(player, Packet.ID_PEERS_STATE, struct.pack('>BB', slot, len(self.players)) + data)
+		self.send(player, Packet.PEERS_STATE, struct.pack('>BB', slot, len(self.players)) + data)
 
 	def sendMicState(self, player):
+		if self.performanceState == 'disable':
+			return
+
 		usedSlots = 0
 		for _, p in self.players.items():
 			if PeerState(p.peerState) is PeerState.MIC:
 				usedSlots += 1
 		self.send(player, Packet.MIC_STATE, struct.pack('>II', self.micNo - usedSlots, self.micNo))
 
-
 	def send(self, player, cmd:Packet, data:list = []):
-		print("[*][{0:16s}] send {1:s} ({2:04d}):".format(player.ip, cmd.name, len(data)), "".join("%02X " % b for b in data))
+		self.log.debug("{0:s} send {1:s} ({2:04d}):".format(player.ip, cmd.name, len(data)), "".join("%02X " % b for b in data))
 
 		d = struct.pack('>III', 12 + len(data), cmd.value, player.sequence)
 		d += bytes(data)
 
-		if not cmd == Packet.ID_ACK:
+		if not cmd == Packet.ACK:
 			player.sequence += 1
 		player.pingTime = datetime.now()
 
 		self.sock.sendto(d, (player.ip, 12000))
 
 	# GAME FUNCTIONS
-	def performanceEnable(self):
-		print("Enabling performance")
-		self.sendAllPacket(Packet.MIC_STATE, struct.pack('>II', len(self.players), 2))
-		self.sendAllPacket(Packet.ID_MIC_SET, struct.pack('>I', 0))
+	def performance(self, state):
+		self.performanceState = state
+		if state == 'enable':
+			self.log.info('Enabling performance')
 
-	def performanceDisable(self):
-		print("Disabling performance")
-		self.sendAllPacket(Packet.MIC_STATE, struct.pack('>II', 0, 0))
+			self.sendAllPacket(Packet.MIC_STATE, struct.pack('>II', len(self.players), 2))
+			self.sendAllPacket(Packet.MIC_SET, struct.pack('>I', 0))
 
-	def performanceStart(self):
-		print("Starting performance")
-		self.sendAllPacket(Packet.ID_PERFORMANCE, [0])
-		for _, player in self.players.items():
-			player.recordFile = open('mic_' + player.ip + '.raw', "wb")
+		elif state == 'disable':
+			self.log.info('Disabling performance')
+			self.sendAllPacket(Packet.MIC_STATE, struct.pack('>II', 0, 0))
 
-	def performanceStop(self):
-		print("Stopping performance")
-		self.sendAllPacket(Packet.ID_PERFORMANCE, [1])
-		for _, player in self.players.items():
-			if not player.recordFile is None and not player.recordFile.closed:
-				player.recordFile.close()
+		elif state == 'start':
+			self.log.info('Starting performance')
+			self.sendAllPacket(Packet.PERFORMANCE, [0])
+			for _, player in self.players.items():
+				player.recordFile = open('mic_' + player.ip + '.raw', 'wb')
+
+		elif state == 'stop':
+			self.log.info('Stopping performance')
+			self.sendAllPacket(Packet.PERFORMANCE, [1])
+			for _, player in self.players.items():
+				if not player.recordFile is None and not player.recordFile.closed:
+					player.recordFile.close()
+
 
 	def refreshCatalogue(self):
-		self.sendAllPacket(Packet.ID_CATALOGUE_REFRESH)
+		self.sendAllPacket(Packet.CATALOGUE_REFRESH)
 
 	def refreshPlaylist(self):
-		self.sendAllPacket(Packet.ID_PLAYLIST_REFRESH)
+		self.sendAllPacket(Packet.PLAYLIST_REFRESH)
 
 	# PLAYER FUNCTIONS
 	def createPlayer(self, ip):
 		player = Player()
 		player.ip = ip
 		self.players[ip] = player
+
+		self.log.info('Player {0:s} entered the server!'.format(player.ip))
 
 	def getPlayer(self, ip):
 		if not ip in self.players:
@@ -161,19 +172,19 @@ class AppServer:
 
 			# ACK everything I receive that is not an ACK
 			if not pId in NO_ACK:
-				print("[*][{0:16s}] recv {1:s} ({2:04d}):".format(player.ip, pId.name, pSize), "".join("%02X " % b for b in data[12:]))
-				self.send(player, Packet.ID_ACK)
+				self.log.debug("{0:s} recv {1:s} ({2:04d}):".format(player.ip, pId.name, pSize), "".join("%02X " % b for b in data[12:]))
+				self.send(player, Packet.ACK)
 
 			# Handle packets
-			if pId == Packet.ID_AUDIO:
+			if pId == Packet.AUDIO:
 				if not player.recordFile.closed:
 					player.recordFile.write(bytearray(data[12+4+8+8+4:]))
 
-			elif pId == Packet.ID_DISCONNECT:
-				print('[-] Player {0:s} left the game!'.format(player.ip))
+			elif pId == Packet.DISCONNECT:
+				self.log.info('Player {0:s} left the server!'.format(player.ip))
 				del self.players[player.ip]
 
-			elif pId == Packet.ID_CONNECT:
+			elif pId == Packet.CONNECT:
 				# Send challenge request
 				# self.send(Packet.CONNECTION_CHALLENGE)
 				# print("[+] Use connection code '0000'")
@@ -183,7 +194,7 @@ class AppServer:
 				# Verify code
 				self.send(player, Packet.CONNECTION_SUCCESSFUL, [1])
 
-			elif pId == Packet.ID_STATE_SELECTION:
+			elif pId == Packet.STATE_SELECTION:
 				(player.peerState, ) = struct.unpack('>i', data[12:16])
 				time.sleep(0.3)
 
