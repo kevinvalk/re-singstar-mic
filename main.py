@@ -3,7 +3,7 @@ from singstarmic.discoveryserver import DiscoveryServer
 from singstarmic.appserver import AppServer
 from singstarmic.catalogueserver import CatalogueServer
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 class MicServer:

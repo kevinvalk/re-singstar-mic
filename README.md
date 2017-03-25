@@ -14,6 +14,10 @@ python main.py
 |-----------|-------------|-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | appserver | performance | state     | state can be enable, disable, start or stop which sets the performance in the correct action. When starting a performance it will record the audio from the app into a file named `mic_<ip>.raw` |
 
+## Demo
+![Demo](demo.gif "Demo")
+Yes I know, I should have enlarged the command line text... sorry!
+
 ## Architecture
 ```
                   +------------+

@@ -166,6 +166,8 @@ class AppServer:
 		self.sock.setblocking(0)
 		self.sock.bind((self.IP, self.PORT))
 
+		self.log.info('Listening on {0:s}:{1:d}'.format(self.IP, self.PORT))
+
 		while self.is_running:
 			try:
 				data, (ip, _) = self.sock.recvfrom(15000)
