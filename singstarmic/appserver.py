@@ -10,9 +10,11 @@ class Packet(enum.Enum):
 	CONNECTION_CHALLENGE  = 4
 	CONNECTION_CODE       = 5 # client -> server
 	CONNECTION_SUCCESSFUL = 6
+	ERROR                 = 7
 
 	AUDIO                 = 256 # client -> server
 	MIC_SET               = 257
+	TIME_SYNC             = 258
 	PERFORMANCE           = 259
 	STATE_SELECTION       = 260
 	PEERS_STATE           = 261
@@ -90,7 +92,7 @@ class AppServer:
 		self.send(player, Packet.MIC_STATE, struct.pack('>II', self.micNo - usedSlots, self.micNo))
 
 	def send(self, player, cmd:Packet, data:list = []):
-		self.log.debug("{0:s} send {1:s} ({2:04d}):".format(player.ip, cmd.name, len(data)), "".join("%02X " % b for b in data))
+		self.log.debug("{0:s} send {1:s} ({2:04d}): {3:s}".format(player.ip, cmd.name, len(data), "".join("%02X " % b for b in data)))
 
 		d = struct.pack('>III', 12 + len(data), cmd.value, player.sequence)
 		d += bytes(data)
@@ -127,6 +129,9 @@ class AppServer:
 				if not player.recordFile is None and not player.recordFile.closed:
 					player.recordFile.close()
 
+	def play(self, entryId):
+		self.log.info('Sending playing song %d', entryId)
+		self.sendAllPacket(Packet.CURRENT_PLAYLIST, struct.pack('>I', entryId))
 
 	def refreshCatalogue(self):
 		self.sendAllPacket(Packet.CATALOGUE_REFRESH)
@@ -172,7 +177,7 @@ class AppServer:
 
 			# ACK everything I receive that is not an ACK
 			if not pId in NO_ACK:
-				self.log.debug("{0:s} recv {1:s} ({2:04d}):".format(player.ip, pId.name, pSize), "".join("%02X " % b for b in data[12:]))
+				self.log.debug("{0:s} recv {1:s} ({2:04d}): {3:s}".format(player.ip, pId.name, pSize, "".join("%02X " % b for b in data[12:])))
 				self.send(player, Packet.ACK)
 
 			# Handle packets

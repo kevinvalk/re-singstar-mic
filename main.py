@@ -3,7 +3,7 @@ from singstarmic.discoveryserver import DiscoveryServer
 from singstarmic.appserver import AppServer
 from singstarmic.catalogueserver import CatalogueServer
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
 class MicServer:
@@ -46,6 +46,8 @@ class MicServer:
 
 			# Run command
 			try:
+				# Dangerous but mkai, PoC!
+				arguments = [eval(argument) for argument in arguments]
 				getattr(target, command)(*arguments)
 			except Exception as e:
 				log.error(e)

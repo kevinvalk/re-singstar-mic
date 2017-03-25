@@ -221,7 +221,330 @@ This endpoint does not return data.
 - Mono
 - 16000 Hz
 
-TODO
+### Protocol
+The basic packet structure is given here, this is the packet header and is send with every packet. The integers are always signed and I guess this is due to the fact that Java is being used which did not support unsigned integers.
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>0</th>
+			<td colspan="4">Data size</td>
+		</tr>
+		<tr>
+			<th>32</th>
+			<td colspan="4">Command</td>
+		</tr>
+		<tr>
+			<th>64</th>
+			<td colspan="4">Sequence number</td>
+		</tr>
+		<tr>
+			<th>96<br/>...</th>
+			<td colspan="4">Zero or more data bytes given by data size</td>
+		</tr>
+	</tbody>
+</table>
+
+#### Reliable packets
+Because the app uses UDP they had to come up with a way to have a reliable packet stream as well. The implementation is simple and done using a sequence counter per client. Each reliable packet gets this sequence number and it requires an acknowledgment. The packet is retried for a maximum of **3** times with a backoff time of 500, 1000 and 2000 milliseconds.
+
+#### Commands
+| Sendto    | Reliable | Command               | Value | Description |
+|-----------|----------|-----------------------|-------|-------------|
+| server    | Yes      | CONNECT               | 0     | Tells the server that the client connected |
+| server    | No       | DISCONNECT            | 1     | Tells the server that the client disconnected |
+| client    | Yes      | RTT                   | 2     | Ping/pong system which prevents the client from timing out |
+| both      | No       | ACK                   | 3     | Acknowledge receive of a packet, if this is not send it will retry for all reliable packets. This sequence number in the header will define which packet is being acknowledged |
+| client    | Yes      | CONNECTION_CHALLENGE  | 4     | Indicates that the client should enter a code which can be shown by the game |
+| server    | Yes      | CONNECTION_CODE       | 5     | Tells the entered code to the server for verification |
+| client    | Yes      | CONNECTION_SUCCESSFUL | 6     | Indicates that either the code is correct or the client was already verified |
+| client    | Yes      | CONNECTION_ERROR      | 7     | Indicates that the entered code is incorrect |
+| server    | No       | AUDIO                 | 256   | The raw audio stream |
+| client    | Yes      | MIC_SET               | 257   | Indicates to the client if it is either player one or two |
+| both      | Yes      | TIME_SYNC             | 258   | Requests the client to send its time since origin packet back to the server |
+| client    | Yes      | PERFORMANCE           | 259   | Starts or stop the performance in essence starting the sending of the audio if the player is in the microphone section of the app |
+| server    | Yes      | STATE_SELECTION       | 260   | Tells the server what the current selected screen is for this client |
+| client    | Yes      | PEERS_STATE           | 261   | Indicates the state of other peers to the client |
+| client    | Yes      | CATALOGUE_REFRESH     | 262   | Indicates that the catalogue has changed and the client should refresh the catalogue |
+| client    | Yes      | PLAYLIST_REFRESH      | 263   | Indicates that the playlist has changed and the client should refresh the playlist |
+| client    | Yes      | MIC_STATE             | 264   | Indicates how many microphone slots are available and used (visually only supports two) |
+| client    | Yes      | CURRENT_SONG      | 265   | Indicates the current playing song by entryId |
+| server    | Yes      | TELEMETRY             | 266   | Tells the server some telemetry information about the client |
+| client    | Yes      | SESSION               | 267   | Indicates the current game session identifier |
+
+#### Packets
+All packets are prepended with the header section. Only the data structure for each packet is shown here. If a command is not given here it is due to it now having data.
+
+##### CONNECT
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">UUID length</td>
+		</tr>
+		<tr>
+			<th>128</th>
+			<td colspan="4">UUID <i>(MAC address of the WiFi adapter, however my devices always show 02:00:00:00:00:00)</i></td>
+		</tr>
+		<tr>
+			<th>128 + len(UUID)</th>
+			<td colspan="4">App version (131073 as of 03/25/2017)</td>
+		</tr>
+	</tbody>
+</table>
+
+##### CONNECTION_CODE
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">Code length</td>
+		</tr>
+		<tr>
+			<th>128</th>
+			<td colspan="4">Code <i>(Code always consistent out of four bytes)</i></td>
+		</tr>
+	</tbody>
+</table>
+
+##### CONNECTION_ERROR
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">Error code (signed int)</td>
+		</tr>
+	</tbody>
+</table>
+
+The different error codes are as follows
+
+| Code  | Name                         | Description |
+|-------|------------------------------|-------------|
+| -1    | INVALID                      | *Unknown* |
+| 0     | TOO_MANY_CONNECTIONS         | To many players are connected to the server |
+| 1     | FAILED_CODE_ENTRY            | The code is not equal to the code on the server |
+| 2     | VERSION_MISMATCH             | The app version is not supported by the server |
+| 3     | INVALID_IDENTIFIER           | *Unknown* |
+| 4     | MAX                          | *Unknown* |
+| 6     | HIGHER_PRIORITY_MIC_INSERTED | **Guessed** USB microphone inserted which supersedes the SingStar Mic app |
+| 20    | NETWORK_ERROR_DISCONNECT     | **Guessed** generic network error|
+| 21    | USER_DISCONNECT              | **Guessed** User is not responding on packets |
+| 22    | NO_GAMES_FOUND               | Either the game has closed down or the app is not on the same network |
+
+##### AUDIO
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">Packet counter (signed int)</td>
+		</tr>
+		<tr>
+			<th>128</th>
+			<td colspan="4" rowspan="2">Current time in microseconds</td>
+		</tr>
+		<tr>
+			<th>160</th>
+		</tr>
+		<tr>
+			<th>192</th>
+			<td colspan="4" rowspan="2">Start time in microseconds</td>
+		</tr>
+		<tr>
+			<th>224</th>
+		</tr>
+		<tr>
+			<th>256</th>
+			<td colspan="4">Audio length</td>
+		</tr>
+		<tr>
+			<th>288<br/>...</th>
+			<td colspan="4">The audio sample.</td>
+		</tr>
+	</tbody>
+</table>
+
+##### MIC_SET
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">The microphone for this player, zero for player one, one for player two (other values will show gray disabled microphone).</td>
+		</tr>
+	</tbody>
+</table>
+
+##### PERFORMANCE
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td>zero for performance start, else stops the performance.</td>
+		</tr>
+	</tbody>
+</table>
+
+##### PEERS_STATE
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+			<th>32</th>
+			<th>40</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td>peer index for this player</td>
+			<td>total peers</td>
+			<td colspan="4">Peer state (repeats "total peers" times)</td>
+		</tr>
+	</tbody>
+</table>
+
+The peer state can have one of the following values
+
+| Value | Name     | Description |
+|-------|----------|-------------|
+| -1    | HOME     | The home screen |
+| 1     | MIC      | The microphone screen, however the MIC_STATE is actually used for indicating that |
+| 3     | VFX      | *Unknown* |
+| 4     | PLAYLIST | The playlist/catalogue screen |
+
+##### MIC_STATE
+The app visually only supports two players, but you can actually send 5 slots in use and 6 available slots and the app will show only one slot in use.
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">Number of slots used</td>
+		</tr>
+		<tr>
+			<th>128</th>
+			<td colspan="4">Total available slots</td>
+		</tr>
+	</tbody>
+</table>
+
+##### CURRENT_SONG
+This seems to not do anything within the app, perhaps this got superseeded by using the "state" in the playlist JSON.
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">Song entry id that is currently being played</td>
+		</tr>
+	</tbody>
+</table>
+
+##### SESSION
+This really is only being used in analytics of the app and I can not see a functional purpose for the session within the app.
+<table>
+	<thead>
+		<tr>
+			<th>Bit offset</th>
+			<th>0</th>
+			<th>8</th>
+			<th>16</th>
+			<th>24</th>
+		</tr>
+	</thead>
+	<tbody>
+		<tr>
+			<th>96</th>
+			<td colspan="4">Length of the session identifier</td>
+		</tr>
+		<tr>
+			<th>128<br/>...</th>
+			<td colspan="4">Game session identifier as a string</td>
+		</tr>
+	</tbody>
+</table>
 
 ## Disclaimer
 This work is completely done by me and purely for educational purposes.
