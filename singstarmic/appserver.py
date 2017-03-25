@@ -10,7 +10,7 @@ class Packet(enum.Enum):
 	CONNECTION_CHALLENGE  = 4
 	CONNECTION_CODE       = 5 # client -> server
 	CONNECTION_SUCCESSFUL = 6
-	ERROR                 = 7
+	CONNECTION_ERROR      = 7
 
 	AUDIO                 = 256 # client -> server
 	MIC_SET               = 257
@@ -50,6 +50,7 @@ class AppServer:
 
 	# Server state
 	performanceState = 'disable'
+	code = None
 
 	def __init__(self, micNo = 2):
 		self.is_running = True
@@ -133,6 +134,9 @@ class AppServer:
 		self.log.info('Sending playing song %d', entryId)
 		self.sendAllPacket(Packet.CURRENT_PLAYLIST, struct.pack('>I', entryId))
 
+	def setCode(self, code):
+		self.code = code
+
 	def refreshCatalogue(self):
 		self.sendAllPacket(Packet.CATALOGUE_REFRESH)
 
@@ -191,13 +195,21 @@ class AppServer:
 
 			elif pId == Packet.CONNECT:
 				# Send challenge request
-				# self.send(Packet.CONNECTION_CHALLENGE)
-				# print("[+] Use connection code '0000'")
-				self.send(player, Packet.CONNECTION_SUCCESSFUL, [1]) # Insta connect without challenge
+				if not self.code is None:
+					self.send(player, Packet.CONNECTION_CHALLENGE)
+					self.log.info('Use the code {0:s}'.format(self.code))
+				else:
+					self.send(player, Packet.CONNECTION_SUCCESSFUL) # No code protection
 
 			elif pId == Packet.CONNECTION_CODE:
 				# Verify code
-				self.send(player, Packet.CONNECTION_SUCCESSFUL, [1])
+				(length, code) = struct.unpack('>i{0:d}s'.format(4), data[12:])
+				code = code.decode('ascii')
+				self.log.info('Player entered code {0:s} which is {1}'.format(code, code == self.code))
+				if code == self.code:
+					self.send(player, Packet.CONNECTION_SUCCESSFUL)
+				else:
+					self.send(player, Packet.CONNECTION_ERROR, struct.pack('>i', 1))
 
 			elif pId == Packet.STATE_SELECTION:
 				(player.peerState, ) = struct.unpack('>i', data[12:16])

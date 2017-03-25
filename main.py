@@ -16,7 +16,7 @@ class MicServer:
 		self.servers[thread.name.lower()] = (server, thread)
 		return self
 
-	def stop(self, signal, frame):
+	def stop(self, signal = None, frame = None):
 		self.is_running = False
 		while self.servers:
 			(_, (server, thread)) = self.servers.popitem()
@@ -64,6 +64,9 @@ class MicServer:
 		while self.is_running:
 			self.command(input(''))
 		log.info('Done')
+
+	def exit(self):
+		self.stop()
 
 
 micServer = MicServer()
